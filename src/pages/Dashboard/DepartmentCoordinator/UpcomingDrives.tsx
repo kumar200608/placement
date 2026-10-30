@@ -18,7 +18,9 @@ export default function UpcomingDrives() {
   const [errorProfile, setErrorProfile] = useState(false);
 
   const fetchData = async () => {
+    console.log("[HOD DEBUG] fetchData called. departmentId =", departmentId);
     if (!departmentId) {
+      console.log("[HOD DEBUG] departmentId is null/undefined — returning early.");
       setLoading(false);
       return;
     }
@@ -31,10 +33,12 @@ export default function UpcomingDrives() {
         .select('drive_id')
         .eq('department_id', departmentId);
 
+      console.log("[HOD DEBUG] Step 1 — drive_eligible_departments:", { eligibleDrives, driveErr });
       if (driveErr) throw driveErr;
-      const driveIds = eligibleDrives.map(d => d.drive_id);
+      const driveIds = (eligibleDrives || []).map(d => d.drive_id);
 
       if (driveIds.length === 0) {
+        console.log("[HOD DEBUG] No drive IDs found for this department. Showing empty state.");
         setDrives([]);
         setLoading(false);
         return;
@@ -47,21 +51,23 @@ export default function UpcomingDrives() {
         .in('id', driveIds)
         .order('visit_date', { ascending: true });
 
+      console.log("[HOD DEBUG] Step 2 — placement_drives:", { count: drivesData?.length, drivesErr });
       if (drivesErr) throw drivesErr;
 
       // 3. Fetch all students in THIS department to calculate eligibility
       const { data: deptStudents, error: studentsErr } = await supabase
         .from('students_master')
-        .select('id, overall_cgpa, current_standing_arrear, history_of_arrear, current_year, department_id')
+        .select('id, overall_cgpa, current_standing_arrear, current_year, department_id')
         .eq('department_id', departmentId);
+      console.log("[HOD DEBUG] Step 3 — students_master:", { count: deptStudents?.length, studentsErr });
       if (studentsErr) throw studentsErr;
 
       // 4. Fetch all applications for these drives
-      // (Simplified: Fetch all across the drive IDs)
       const { data: apps, error: appsErr } = await (supabase as any)
         .from('placement_applications')
         .select('drive_id, student_id, status')
         .in('drive_id', driveIds);
+      console.log("[HOD DEBUG] Step 4 — placement_applications:", { count: (apps || []).length, appsErr });
       if (appsErr) throw appsErr;
 
       // 5. Process data locally
@@ -70,12 +76,11 @@ export default function UpcomingDrives() {
         const eligibleStudents = (deptStudents || []).filter(s => {
           const meetCgpa = parseFloat(String(s.overall_cgpa || 0)) >= (drive.min_cgpa || 0);
           const meetBacklogs = parseInt(String(s.current_standing_arrear || 0)) <= (drive.max_backlogs || 99);
-          const meetHistory = parseInt(String(s.history_of_arrear || 0)) <= (drive.max_history_arrears || 99);
           const studentYear = s.current_year || "4th Year";
           const driveTargetYear = drive.eligible_batches || "4th Year";
           const meetYear = driveTargetYear === "All Students" || studentYear === driveTargetYear;
           
-          return meetCgpa && meetBacklogs && meetHistory && meetYear;
+          return meetCgpa && meetBacklogs && meetYear;
         });
 
         const eligibleIds = new Set(eligibleStudents.map(s => s.id));
